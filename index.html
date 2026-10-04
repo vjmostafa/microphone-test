@@ -639,7 +639,23 @@
     }
 
     if (listening) {
-      recognition.stop();
+      if (recognition) recognition.stop();
+      return;
+    }
+
+    // SpeechRecognition object must be created before calling start().
+    // Previously recognition stayed null, causing:
+    // TypeError: Cannot read properties of null (reading 'start')
+    if (!recognition) {
+      recognition = createRecognition();
+    }
+
+    if (!recognition) {
+      setBadge(speechBadge, 'قابل ایجاد نیست', 'red');
+      setStatus('❌ سرویس تشخیص گفتار در این مرورگر قابل ایجاد نیست.', 'error');
+      setDetails(
+        '<b>مشکل:</b> API تشخیص گفتار شناسایی شد، اما شیء SpeechRecognition ساخته نشد.'
+      );
       return;
     }
 

@@ -628,7 +628,29 @@
     return r;
   }
 
-  function startSpeech(testOnly = false) {
+  async function releaseMicrophoneForSpeech() {
+    // Android Chrome can reject SpeechRecognition with 'not-allowed' when
+    // this page is still holding an active getUserMedia microphone stream.
+    // Release the test stream before starting the browser speech service.
+    stopMeter();
+    analyser = null;
+
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+
+    if (audioContext) {
+      try {
+        await audioContext.close();
+      } catch (e) {
+        // Ignore close errors; the important part is releasing the mic tracks.
+      }
+      audioContext = null;
+    }
+  }
+
+  async function startSpeech(testOnly = false) {
     if (!SpeechRecognition) {
       setBadge(speechBadge, 'پشتیبانی نمی‌شود', 'red');
       setStatus('مرورگر شما SpeechRecognition را پشتیبانی نمی‌کند.', 'error');
@@ -660,6 +682,9 @@
     }
 
     recognitionBeforeText = textBox.value;
+
+    // Important for Android: stop the separate microphone test stream first.
+    await releaseMicrophoneForSpeech();
 
     try {
       recognition.start();

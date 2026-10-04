@@ -223,7 +223,7 @@
   <div class="page">
     <main class="card">
       <h1>تست تایپ و تبدیل گفتار به نوشتار</h1>
-      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V4</b></div>
+      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V5</b></div>
 
       <div class="hint">
         برای تایپ معمولی داخل کادر بنویسید. برای گفتار، ابتدا میکروفون را تست کنید
@@ -266,6 +266,28 @@
             <button id="testSpeechBtn" class="secondary">🗣 تست گفتار</button>
           </div>
 
+          <div class="panel" style="margin-top:14px; background:#fff;">
+            <div class="panel-title">🌐 تست زبان‌های SpeechRecognition</div>
+            <div class="diag">
+              <div class="small" style="margin-top:0; text-align:right;">
+                هر زبان را جداگانه تست کنید تا مشخص شود مشکل فقط فارسی است یا خود سرویس تشخیص گفتار.
+              </div>
+              <div class="row" style="flex-wrap:wrap; margin-top:10px;">
+                <button class="secondary lang-test" data-lang="fa-IR">🇮🇷 فارسی (fa-IR)</button>
+                <button class="secondary lang-test" data-lang="en-US">🇺🇸 English (en-US)</button>
+                <button class="secondary lang-test" data-lang="ar-SA">🇸🇦 العربية (ar-SA)</button>
+                <button class="secondary lang-test" data-lang="tr-TR">🇹🇷 Türkçe (tr-TR)</button>
+              </div>
+              <div class="row" style="margin-top:10px;">
+                <button id="checkOfflineBtn" class="secondary dark">📦 بررسی امکان تشخیص آفلاین</button>
+                <button id="installFaBtn" class="secondary">⬇️ نصب بسته فارسی</button>
+                <button id="testOfflineFaBtn" class="secondary">📴 تست فارسی آفلاین</button>
+              </div>
+              <div id="offlineDetails" class="details">هنوز بررسی آفلاین انجام نشده است.</div>
+              <div id="langResults" class="details" style="margin-top:8px;"></div>
+            </div>
+          </div>
+
           <div class="meter-wrap">
             <div id="meter" class="meter"></div>
           </div>
@@ -304,6 +326,12 @@
   const speechBadge = document.getElementById('speechBadge');
   const permissionBadge = document.getElementById('permissionBadge');
   const meter = document.getElementById('meter');
+  const checkOfflineBtn = document.getElementById('checkOfflineBtn');
+  const installFaBtn = document.getElementById('installFaBtn');
+  const testOfflineFaBtn = document.getElementById('testOfflineFaBtn');
+  const offlineDetailsEl = document.getElementById('offlineDetails');
+  const langResultsEl = document.getElementById('langResults');
+  const langButtons = Array.from(document.querySelectorAll('.lang-test'));
 
   let recognition = null;
   let listening = false;
@@ -539,6 +567,203 @@
     }
   }
 
+  function addLangResult(lang, text, kind = '') {
+    const line = document.createElement('div');
+    line.style.marginTop = '5px';
+    line.innerHTML = '<b>' + escapeHtml(lang) + '</b> — <span class="' + escapeHtml(kind) + '">' + escapeHtml(text) + '</span>';
+    langResultsEl.prepend(line);
+  }
+
+  async function checkOnDeviceLanguages() {
+    if (!SpeechRecognition) {
+      offlineDetailsEl.innerHTML = '<b>SpeechRecognition در این مرورگر موجود نیست.</b>';
+      return;
+    }
+    const availableFn = SpeechRecognition.available;
+    const installFn = SpeechRecognition.install;
+    if (typeof availableFn !== 'function') {
+      offlineDetailsEl.innerHTML =
+        '<b>این نسخه از مرورگر API تشخیص آفلاین را ارائه نمی‌کند.</b><br>' +
+        'available()/install() در دسترس نیستند؛ بنابراین از خود Web Speech API نمی‌توانیم بسته زبان آفلاین را مدیریت کنیم.';
+      return;
+    }
+
+    checkOfflineBtn.disabled = true;
+    installFaBtn.disabled = true;
+    try {
+      const langs = ['fa-IR', 'en-US', 'ar-SA', 'tr-TR'];
+      const rows = [];
+      for (const lang of langs) {
+        try {
+          const state = await availableFn.call(SpeechRecognition, {
+            langs: [lang],
+            processLocally: true,
+            quality: 'dictation'
+          });
+          rows.push('<b>' + escapeHtml(lang) + '</b>: ' + escapeHtml(state));
+        } catch (e) {
+          rows.push('<b>' + escapeHtml(lang) + '</b>: خطا — ' + escapeHtml(e.name || e.message || 'UnknownError'));
+        }
+      }
+      offlineDetailsEl.innerHTML =
+        '<b>نتیجه بررسی تشخیص آفلاین:</b><br>' + rows.join('<br>') +
+        '<br><br><span style="color:#64748b">available=پکیج محلی آماده، downloadable=قابل دانلود، downloading=در حال دانلود، unavailable=در دستگاه/مرورگر موجود نیست.</span>';
+    } finally {
+      checkOfflineBtn.disabled = false;
+      installFaBtn.disabled = false;
+    }
+  }
+
+  async function installPersianPack() {
+    if (!SpeechRecognition || typeof SpeechRecognition.install !== 'function') {
+      offlineDetailsEl.innerHTML = '<b>نصب بسته آفلاین از این مرورگر پشتیبانی نمی‌شود.</b>';
+      return;
+    }
+    installFaBtn.disabled = true;
+    setStatus('⬇️ در حال بررسی/نصب بسته گفتار فارسی...', 'warn');
+    try {
+      const ok = await SpeechRecognition.install({
+        langs: ['fa-IR'],
+        quality: 'dictation'
+      });
+      if (ok) {
+        setStatus('✅ بسته گفتار فارسی محلی آماده است.', 'ok');
+        offlineDetailsEl.innerHTML = '<b>نصب بسته فارسی موفق بود.</b><br>حالا می‌توانیم تست تشخیص محلی فارسی را انجام دهیم.';
+      } else {
+        setStatus('❌ نصب بسته فارسی موفق نشد.', 'error');
+        offlineDetailsEl.innerHTML = '<b>مرورگر نتوانست بسته فارسی را نصب کند.</b>';
+      }
+    } catch (e) {
+      setStatus('❌ خطا در نصب بسته فارسی.', 'error');
+      offlineDetailsEl.innerHTML = '<b>کد:</b> ' + escapeHtml(e.name || 'UnknownError') + '<br><b>پیام:</b> ' + escapeHtml(e.message || 'بدون توضیح');
+    } finally {
+      installFaBtn.disabled = false;
+    }
+  }
+
+  async function testOfflinePersian() {
+    if (!SpeechRecognition) {
+      setStatus('SpeechRecognition در این مرورگر موجود نیست.', 'error');
+      return;
+    }
+    if (typeof SpeechRecognition.available !== 'function') {
+      setStatus('❌ API تشخیص آفلاین در این مرورگر موجود نیست.', 'error');
+      setDetails('<b>نتیجه:</b> SpeechRecognition.available() در دسترس نیست.');
+      return;
+    }
+
+    releaseMicrophoneForSpeechNow();
+    try {
+      const state = await SpeechRecognition.available({
+        langs: ['fa-IR'],
+        processLocally: true,
+        quality: 'dictation'
+      });
+      if (state !== 'available') {
+        setStatus('❌ تشخیص آفلاین فارسی آماده نیست: ' + state, 'error');
+        setDetails('<b>fa-IR محلی:</b> ' + escapeHtml(state) + '<br>ابتدا «بررسی امکان تشخیص آفلاین» و در صورت نیاز «نصب بسته فارسی» را اجرا کنید.');
+        return;
+      }
+
+      const r = new SpeechRecognition();
+      r.lang = 'fa-IR';
+      r.continuous = false;
+      r.interimResults = true;
+      r.maxAlternatives = 1;
+      r.processLocally = true;
+      recognition = r;
+
+      r.onstart = () => {
+        listening = true;
+        setStatus('📴 تشخیص آفلاین فارسی فعال شد. صحبت کنید.', 'ok');
+        setDetails('<b>حالت:</b> on-device / offline<br><b>زبان:</b> fa-IR<br><b>مقدار processLocally:</b> true');
+      };
+      r.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          interimEl.textContent = 'نتیجه آفلاین: ' + transcript;
+          if (event.results[event.results.length - 1].isFinal) {
+            textBox.value = transcript.trim();
+          }
+        }
+      };
+      r.onerror = (event) => {
+        listening = false;
+        const code = event.error || 'unknown';
+        setStatus('❌ خطای تشخیص آفلاین: ' + code, 'error');
+        setDetails('<b>حالت:</b> on-device / offline<br><b>کد خطا:</b> ' + escapeHtml(code) + '<br><b>پیام:</b> ' + escapeHtml(event.message || 'پیامی ارائه نشده است.'));
+      };
+      r.onend = () => {
+        listening = false;
+        interimEl.textContent = '';
+      };
+
+      setStatus('📴 در حال شروع تشخیص آفلاین فارسی...', 'warn');
+      r.start();
+    } catch (e) {
+      setStatus('❌ شروع تشخیص آفلاین فارسی ناموفق بود.', 'error');
+      setDetails('<b>کد:</b> ' + escapeHtml(e.name || 'UnknownError') + '<br><b>پیام:</b> ' + escapeHtml(e.message || 'بدون توضیح'));
+    }
+  }
+
+  async function testLanguage(lang) {
+    if (!SpeechRecognition) {
+      setStatus('SpeechRecognition در این مرورگر موجود نیست.', 'error');
+      return;
+    }
+    releaseMicrophoneForSpeechNow();
+    if (recognition && listening) {
+      try { recognition.stop(); } catch (e) {}
+    }
+
+    recognition = null;
+    const r = new SpeechRecognition();
+    r.lang = lang;
+    r.continuous = false;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    addLangResult(lang, 'شروع تست...', 'yellow');
+    setStatus('🎤 تست ' + lang + ' شروع شد. صحبت کنید.', 'ok');
+
+    r.onstart = () => {
+      listening = true;
+      addLangResult(lang, 'onstart موفق شد', 'green');
+      setDetails('<b>زبان تست‌شده:</b> ' + escapeHtml(lang) + '<br><b>رویداد:</b> onstart');
+    };
+    r.onresult = (event) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+      if (transcript) {
+        interimEl.textContent = 'نتیجه ' + lang + ': ' + transcript;
+        if (event.results[event.results.length - 1].isFinal) textBox.value = transcript.trim();
+      }
+    };
+    r.onerror = (event) => {
+      listening = false;
+      const code = event.error || 'unknown';
+      addLangResult(lang, 'onerror: ' + code, code === 'not-allowed' ? 'red' : 'yellow');
+      setStatus('❌ ' + lang + ' → ' + code, 'error');
+      setDetails('<b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد خطای واقعی:</b> ' + escapeHtml(code));
+    };
+    r.onend = () => {
+      listening = false;
+      interimEl.textContent = '';
+    };
+
+    try {
+      r.start();
+    } catch (e) {
+      const name = e.name || 'UnknownError';
+      addLangResult(lang, 'start(): ' + name, 'red');
+      setStatus('❌ start() برای ' + lang + ' شکست خورد.', 'error');
+      setDetails('<b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد:</b> ' + escapeHtml(name) + '<br><b>پیام:</b> ' + escapeHtml(e.message || 'بدون توضیح'));
+    }
+  }
+
   function createRecognition() {
     if (!SpeechRecognition) return null;
 
@@ -629,6 +854,27 @@
     return r;
   }
 
+  function releaseMicrophoneForSpeechNow() {
+    stopMeter();
+    analyser = null;
+
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+
+    if (audioContext) {
+      const ctx = audioContext;
+      audioContext = null;
+      try {
+        const closing = ctx.close();
+        if (closing && typeof closing.catch === 'function') closing.catch(() => {});
+      } catch (e) {
+        // The microphone tracks above were already stopped synchronously.
+      }
+    }
+  }
+
   async function releaseMicrophoneForSpeech() {
     // Android Chrome can reject SpeechRecognition with 'not-allowed' when
     // this page is still holding an active getUserMedia microphone stream.
@@ -685,7 +931,7 @@
     recognitionBeforeText = textBox.value;
 
     // Important for Android: stop the separate microphone test stream first.
-    await releaseMicrophoneForSpeech();
+    releaseMicrophoneForSpeechNow();
 
     try {
       recognition.start();
@@ -727,6 +973,13 @@
   micBtn.addEventListener('click', () => startSpeech(false));
   testSpeechBtn.addEventListener('click', () => startSpeech(true));
   testMicBtn.addEventListener('click', testMicrophone);
+
+  langButtons.forEach(btn => {
+    btn.addEventListener('click', () => testLanguage(btn.dataset.lang));
+  });
+  checkOfflineBtn.addEventListener('click', checkOnDeviceLanguages);
+  installFaBtn.addEventListener('click', installPersianPack);
+  testOfflineFaBtn.addEventListener('click', testOfflinePersian);
 
   window.addEventListener('beforeunload', () => {
     if (micStream) micStream.getTracks().forEach(t => t.stop());

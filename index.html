@@ -223,7 +223,7 @@
   <div class="page">
     <main class="card">
       <h1>تست تایپ و تبدیل گفتار به نوشتار</h1>
-      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V5</b></div>
+      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V6</b></div>
 
       <div class="hint">
         برای تایپ معمولی داخل کادر بنویسید. برای گفتار، ابتدا میکروفون را تست کنید
@@ -709,253 +709,209 @@
     }
   }
 
-  async function testLanguage(lang) {
-    if (!SpeechRecognition) {
-      setStatus('SpeechRecognition در این مرورگر موجود نیست.', 'error');
-      return;
-    }
-    releaseMicrophoneForSpeechNow();
-    if (recognition && listening) {
-      try { recognition.stop(); } catch (e) {}
-    }
+  function recognitionConstructorInfo() {
+    const hasSR = typeof window.SpeechRecognition === 'function';
+    const hasWebkit = typeof window.webkitSpeechRecognition === 'function';
+    return {
+      hasSR,
+      hasWebkit,
+      primary: hasSR ? 'SpeechRecognition' : (hasWebkit ? 'webkitSpeechRecognition' : 'none')
+    };
+  }
 
-    recognition = null;
-    const r = new SpeechRecognition();
+  function formatBool(v) {
+    return v ? 'بله' : 'خیر';
+  }
+
+  function clearRecognitionHandlers(r) {
+    if (!r) return;
+    r.onstart = null;
+    r.onaudiostart = null;
+    r.onsoundstart = null;
+    r.onspeechstart = null;
+    r.onresult = null;
+    r.onerror = null;
+    r.onspeechend = null;
+    r.onsoundend = null;
+    r.onaudioend = null;
+    r.onend = null;
+  }
+
+  function buildRecognition(lang, ctorName) {
+    let Ctor = null;
+    if (ctorName === 'SpeechRecognition') Ctor = window.SpeechRecognition;
+    if (ctorName === 'webkitSpeechRecognition') Ctor = window.webkitSpeechRecognition;
+    if (typeof Ctor !== 'function') return null;
+
+    const r = new Ctor();
     r.lang = lang;
     r.continuous = false;
     r.interimResults = true;
     r.maxAlternatives = 1;
-
-    addLangResult(lang, 'شروع تست...', 'yellow');
-    setStatus('🎤 تست ' + lang + ' شروع شد. صحبت کنید.', 'ok');
-
-    r.onstart = () => {
-      listening = true;
-      addLangResult(lang, 'onstart موفق شد', 'green');
-      setDetails('<b>زبان تست‌شده:</b> ' + escapeHtml(lang) + '<br><b>رویداد:</b> onstart');
-    };
-    r.onresult = (event) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0].transcript;
-      if (transcript) {
-        interimEl.textContent = 'نتیجه ' + lang + ': ' + transcript;
-        if (event.results[event.results.length - 1].isFinal) textBox.value = transcript.trim();
-      }
-    };
-    r.onerror = (event) => {
-      listening = false;
-      const code = event.error || 'unknown';
-      addLangResult(lang, 'onerror: ' + code, code === 'not-allowed' ? 'red' : 'yellow');
-      setStatus('❌ ' + lang + ' → ' + code, 'error');
-      setDetails('<b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد خطای واقعی:</b> ' + escapeHtml(code));
-    };
-    r.onend = () => {
-      listening = false;
-      interimEl.textContent = '';
-    };
-
-    try {
-      r.start();
-    } catch (e) {
-      const name = e.name || 'UnknownError';
-      addLangResult(lang, 'start(): ' + name, 'red');
-      setStatus('❌ start() برای ' + lang + ' شکست خورد.', 'error');
-      setDetails('<b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد:</b> ' + escapeHtml(name) + '<br><b>پیام:</b> ' + escapeHtml(e.message || 'بدون توضیح'));
-    }
+    return r;
   }
 
-  function createRecognition() {
-    if (!SpeechRecognition) return null;
+  function showOnlineDiagnostic(lang, ctorName, stage, extra='') {
+    const ua = navigator.userAgent;
+    const secure = window.isSecureContext;
+    const activation = navigator.userActivation ? navigator.userActivation.isActive : null;
+    const perm = permissionBadge.textContent || 'نامشخص';
+    setDetails(
+      '<b>تست آنلاین SpeechRecognition</b><br>' +
+      '<b>زبان:</b> ' + escapeHtml(lang) + '<br>' +
+      '<b>سازنده:</b> ' + escapeHtml(ctorName) + '<br>' +
+      '<b>مرحله:</b> ' + escapeHtml(stage) + '<br>' +
+      '<b>Secure Context:</b> ' + escapeHtml(secure ? 'true' : 'false') + '<br>' +
+      '<b>User Activation هنگام شروع:</b> ' + escapeHtml(activation === null ? 'قابل تشخیص نیست' : (activation ? 'فعال' : 'غیرفعال')) + '<br>' +
+      '<b>مجوز میکروفون:</b> ' + escapeHtml(perm) + '<br>' +
+      '<b>URL:</b> ' + escapeHtml(location.href) + '<br>' +
+      '<b>Chrome:</b> ' + escapeHtml(ua) +
+      (extra ? '<br><br>' + extra : '')
+    );
+  }
 
-    const r = new SpeechRecognition();
-    r.lang = 'fa-IR';
-    r.continuous = false;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
+  function testOnlineRecognition(lang, ctorName) {
+    // Deliberately NOT async: recognition.start() must happen directly inside
+    // the user's button click so Android Chrome sees a real user activation.
+    if (!window.isSecureContext) {
+      setStatus('❌ صفحه HTTPS امن نیست.', 'error');
+      showOnlineDiagnostic(lang, ctorName, 'secure-context-failed');
+      return;
+    }
 
+    releaseMicrophoneForSpeechNow();
+
+    if (recognition) {
+      try { recognition.abort(); } catch (e) {}
+      clearRecognitionHandlers(recognition);
+      recognition = null;
+    }
+    listening = false;
+
+    const info = recognitionConstructorInfo();
+    const preferred = ctorName || info.primary;
+    if (preferred === 'none') {
+      setBadge(speechBadge, 'API ندارد', 'red');
+      setStatus('❌ SpeechRecognition در این مرورگر وجود ندارد.', 'error');
+      showOnlineDiagnostic(lang, preferred, 'constructor-missing');
+      return;
+    }
+
+    let r;
+    try {
+      r = buildRecognition(lang, preferred);
+    } catch (e) {
+      setStatus('❌ ساخت شیء SpeechRecognition شکست خورد.', 'error');
+      showOnlineDiagnostic(
+        lang,
+        preferred,
+        'constructor-threw',
+        '<b>کد:</b> ' + escapeHtml(e.name || 'UnknownError') + '<br>' +
+        '<b>پیام:</b> ' + escapeHtml(e.message || 'بدون توضیح')
+      );
+      return;
+    }
+
+    if (!r) {
+      setStatus('❌ سازنده انتخاب‌شده در این مرورگر موجود نیست.', 'error');
+      showOnlineDiagnostic(lang, preferred, 'constructor-null');
+      return;
+    }
+
+    recognition = r;
+    recognitionBeforeText = textBox.value;
+    addLangResult(lang + ' / ' + preferred, 'start() در حال اجرا...', 'yellow');
+    setStatus('🎤 ' + lang + ' — سرویس آنلاین در حال شروع است...', 'warn');
+    showOnlineDiagnostic(lang, preferred, 'before-start');
+
+    r.onaudiostart = () => {
+      setDetails('<b>onaudiostart:</b> ورودی صوتی شروع شد.<br><b>زبان:</b> ' + escapeHtml(lang) + '<br><b>سازنده:</b> ' + escapeHtml(preferred));
+    };
+    r.onsoundstart = () => {
+      setStatus('🔊 صدا دریافت شد؛ منتظر تشخیص گفتار...', 'ok');
+    };
+    r.onspeechstart = () => {
+      setStatus('🗣 گفتار شناسایی شد؛ در حال تبدیل به متن...', 'ok');
+    };
     r.onstart = () => {
       listening = true;
-      micBtn.textContent = '⏹ توقف گفتار';
-      micBtn.classList.add('listening');
-      testSpeechBtn.disabled = true;
+      setBadge(speechBadge, 'شروع شد', 'green');
+      addLangResult(lang + ' / ' + preferred, 'onstart موفق', 'green');
       setStatus('🎤 در حال گوش دادن... صحبت کنید.', 'ok');
-      setDetails(
-        '<b>سرویس گفتار:</b> شروع شد.<br>زبان انتخاب‌شده: <b>fa-IR</b>'
-      );
+      showOnlineDiagnostic(lang, preferred, 'onstart-success');
     };
-
     r.onresult = (event) => {
       let finalTranscript = '';
       let interimTranscript = '';
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const part = event.results[i][0].transcript;
+        const part = event.results[i][0].transcript || '';
         if (event.results[i].isFinal) finalTranscript += part;
         else interimTranscript += part;
       }
-
-      if (interimTranscript) {
-        interimEl.textContent = 'در حال تشخیص: ' + interimTranscript;
-      } else {
-        interimEl.textContent = '';
-      }
-
+      interimEl.textContent = interimTranscript ? 'در حال تشخیص: ' + interimTranscript : '';
       if (finalTranscript) {
         const base = recognitionBeforeText.trim();
         textBox.value = base
           ? base + (base.endsWith(' ') ? '' : ' ') + finalTranscript.trim()
           : finalTranscript.trim();
-
         recognitionBeforeText = textBox.value;
-        textBox.focus();
       }
+      setDetails(
+        '<b>نتیجه تشخیص:</b> ' + escapeHtml(finalTranscript || interimTranscript || '(خالی)') + '<br>' +
+        '<b>زبان:</b> ' + escapeHtml(lang) + '<br>' +
+        '<b>سازنده:</b> ' + escapeHtml(preferred)
+      );
     };
-
     r.onerror = (event) => {
+      listening = false;
       const code = event.error || 'unknown';
       const msg = event.message || '';
-
-      const map = {
-        'not-allowed': 'اجازه استفاده از گفتار/میکروفون رد شده است.',
-        'service-not-allowed': 'سرویس تشخیص گفتار توسط مرورگر در دسترس/مجاز نیست.',
-        'network': 'ارتباط شبکه برای سرویس تشخیص گفتار برقرار نشد.',
-        'no-speech': 'صدایی تشخیص داده نشد.',
-        'audio-capture': 'میکروفون برای سرویس گفتار قابل دریافت نیست.',
-        'language-not-supported': 'زبان فارسی (fa-IR) توسط سرویس این مرورگر پشتیبانی نشد.',
-        'aborted': 'تشخیص گفتار لغو شد.',
-        'bad-grammar': 'خطای مربوط به دستور زبان تشخیص گفتار.',
-        'phrases-not-supported': 'مدل گفتار از این قابلیت پشتیبانی نمی‌کند.'
-      };
-
-      const friendly = map[code] || 'خطای ناشناخته در سرویس تشخیص گفتار.';
-      if (code === 'not-allowed' || code === 'audio-capture') {
-        setPermissionGuide(permissionGuideText());
-        setBadge(permissionBadge, 'رد شده / نیازمند بررسی', 'red');
-      }
-      setStatus('❌ ' + friendly, 'error');
-      setDetails(
-        '<b>کد خطای واقعی SpeechRecognition:</b> ' + escapeHtml(code) + '<br>' +
-        '<b>پیام سرویس:</b> ' + escapeHtml(msg || 'پیامی ارائه نشده است.') + '<br>' +
-        '<b>زبان:</b> fa-IR'
-      );
+      addLangResult(lang + ' / ' + preferred, 'onerror: ' + code, code === 'not-allowed' ? 'red' : 'yellow');
+      const extra =
+        '<b>event.error:</b> ' + escapeHtml(code) + '<br>' +
+        '<b>event.message:</b> ' + escapeHtml(msg || '(خالی)') + '<br>' +
+        '<b>نکته:</b> not-allowed لزوماً به معنی رد مجوز میکروفون نیست؛ مرورگر می‌تواند سرویس تشخیص گفتار را به دلایل امنیتی/حریم خصوصی/سیاست کاربر رد کند.';
+      setStatus('❌ ' + lang + ' → ' + code, 'error');
+      showOnlineDiagnostic(lang, preferred, 'onerror', extra);
     };
-
+    r.onspeechend = () => {
+      setDetails('<b>onspeechend:</b> پایان گفتار.<br><b>زبان:</b> ' + escapeHtml(lang));
+    };
     r.onend = () => {
       listening = false;
-      micBtn.textContent = '🎤 شروع گفتار';
-      micBtn.classList.remove('listening');
-      testSpeechBtn.disabled = false;
       interimEl.textContent = '';
-      if (!statusEl.classList.contains('status error')) {
-        setStatus('آماده', '');
-      }
+      if (!statusEl.classList.contains('status error')) setStatus('آماده', '');
     };
 
-    return r;
-  }
-
-  function releaseMicrophoneForSpeechNow() {
-    stopMeter();
-    analyser = null;
-
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-
-    if (audioContext) {
-      const ctx = audioContext;
-      audioContext = null;
-      try {
-        const closing = ctx.close();
-        if (closing && typeof closing.catch === 'function') closing.catch(() => {});
-      } catch (e) {
-        // The microphone tracks above were already stopped synchronously.
-      }
-    }
-  }
-
-  async function releaseMicrophoneForSpeech() {
-    // Android Chrome can reject SpeechRecognition with 'not-allowed' when
-    // this page is still holding an active getUserMedia microphone stream.
-    // Release the test stream before starting the browser speech service.
-    stopMeter();
-    analyser = null;
-
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-
-    if (audioContext) {
-      try {
-        await audioContext.close();
-      } catch (e) {
-        // Ignore close errors; the important part is releasing the mic tracks.
-      }
-      audioContext = null;
-    }
-  }
-
-  async function startSpeech(testOnly = false) {
-    if (!SpeechRecognition) {
-      setBadge(speechBadge, 'پشتیبانی نمی‌شود', 'red');
-      setStatus('مرورگر شما SpeechRecognition را پشتیبانی نمی‌کند.', 'error');
-      setDetails(
-        '<b>مشکل:</b> SpeechRecognition / webkitSpeechRecognition در این مرورگر موجود نیست.'
-      );
-      return;
-    }
-
-    if (listening) {
-      if (recognition) recognition.stop();
-      return;
-    }
-
-    // SpeechRecognition object must be created before calling start().
-    // Previously recognition stayed null, causing:
-    // TypeError: Cannot read properties of null (reading 'start')
-    if (!recognition) {
-      recognition = createRecognition();
-    }
-
-    if (!recognition) {
-      setBadge(speechBadge, 'قابل ایجاد نیست', 'red');
-      setStatus('❌ سرویس تشخیص گفتار در این مرورگر قابل ایجاد نیست.', 'error');
-      setDetails(
-        '<b>مشکل:</b> API تشخیص گفتار شناسایی شد، اما شیء SpeechRecognition ساخته نشد.'
-      );
-      return;
-    }
-
-    recognitionBeforeText = textBox.value;
-
-    // Important for Android: stop the separate microphone test stream first.
-    releaseMicrophoneForSpeechNow();
-
     try {
-      recognition.start();
-
-      if (testOnly) {
-        setDetails(
-          '<b>تست گفتار شروع شد.</b><br>' +
-          'یک جمله کوتاه فارسی مثل «سلام، این یک تست است» بگویید.'
-        );
-      } else {
-        setBadge(speechBadge, 'در حال استفاده', 'green');
-      }
-    } catch (err) {
-      const name = err && err.name ? err.name : 'UnknownError';
-      const message = err && err.message ? err.message : 'بدون توضیح';
-
-      setStatus('❌ شروع SpeechRecognition با خطا متوقف شد.', 'error');
-      setDetails(
-        '<b>کد خطای واقعی هنگام start():</b> ' + escapeHtml(name) + '<br>' +
-        '<b>پیام مرورگر:</b> ' + escapeHtml(message) + '<br><br>' +
-        '<b>پیشنهاد:</b> یک‌بار اول «تست میکروفون» را اجرا کنید؛ اگر میکروفون سالم بود ' +
-        'ولی اینجا خطا ماند، مشکل معمولاً از پشتیبانی/دسترسی سرویس SpeechRecognition است.'
+      // Critical: no await / setTimeout / Promise before start().
+      r.start();
+      addLangResult(lang + ' / ' + preferred, 'start() بدون خطای فوری', 'green');
+    } catch (e) {
+      const name = e.name || 'UnknownError';
+      const msg = e.message || 'بدون توضیح';
+      setStatus('❌ start() برای ' + lang + ' شکست خورد.', 'error');
+      addLangResult(lang + ' / ' + preferred, 'start(): ' + name, 'red');
+      showOnlineDiagnostic(
+        lang,
+        preferred,
+        'start-threw',
+        '<b>کد:</b> ' + escapeHtml(name) + '<br>' +
+        '<b>پیام:</b> ' + escapeHtml(msg)
       );
     }
+  }
+
+  function testLanguage(lang) {
+    // Test the prefixed constructor first on Android because that is commonly
+    // the implementation exposed by Chromium-based mobile browsers.
+    const info = recognitionConstructorInfo();
+    const ctor = info.hasWebkit ? 'webkitSpeechRecognition' : info.primary;
+    testOnlineRecognition(lang, ctor);
+  }
+
+  function startSpeech(testOnly = false) {
+    testOnlineRecognition('fa-IR', null);
   }
 
   clearBtn.addEventListener('click', () => {

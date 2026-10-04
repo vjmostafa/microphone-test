@@ -223,7 +223,7 @@
   <div class="page">
     <main class="card">
       <h1>تست تایپ و تبدیل گفتار به نوشتار</h1>
-      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V6</b></div>
+      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V7</b></div>
 
       <div class="hint">
         برای تایپ معمولی داخل کادر بنویسید. برای گفتار، ابتدا میکروفون را تست کنید
@@ -278,6 +278,9 @@
                 <button class="secondary lang-test" data-lang="ar-SA">🇸🇦 العربية (ar-SA)</button>
                 <button class="secondary lang-test" data-lang="tr-TR">🇹🇷 Türkçe (tr-TR)</button>
               </div>
+              <div id="onlineResult" class="details" style="margin-top:10px; padding:12px; border-radius:12px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a;">
+                نتیجه تست آنلاین هنوز اجرا نشده است. برای بررسی سرویس آنلاین، یکی از دکمه‌های زبان بالا را بزنید.
+              </div>
               <div class="row" style="margin-top:10px;">
                 <button id="checkOfflineBtn" class="secondary dark">📦 بررسی امکان تشخیص آفلاین</button>
                 <button id="installFaBtn" class="secondary">⬇️ نصب بسته فارسی</button>
@@ -331,6 +334,7 @@
   const testOfflineFaBtn = document.getElementById('testOfflineFaBtn');
   const offlineDetailsEl = document.getElementById('offlineDetails');
   const langResultsEl = document.getElementById('langResults');
+  const onlineResultEl = document.getElementById('onlineResult');
   const langButtons = Array.from(document.querySelectorAll('.lang-test'));
 
   let recognition = null;
@@ -565,6 +569,13 @@
     } finally {
       testMicBtn.disabled = false;
     }
+  }
+
+  function setOnlineResult(text, kind = '') {
+    onlineResultEl.innerHTML = text;
+    onlineResultEl.style.background = kind === 'error' ? '#fef2f2' : (kind === 'ok' ? '#f0fdf4' : '#eff6ff');
+    onlineResultEl.style.borderColor = kind === 'error' ? '#fecaca' : (kind === 'ok' ? '#bbf7d0' : '#bfdbfe');
+    onlineResultEl.style.color = kind === 'error' ? '#991b1b' : (kind === 'ok' ? '#166534' : '#1e3a8a');
   }
 
   function addLangResult(lang, text, kind = '') {
@@ -814,6 +825,7 @@
 
     if (!r) {
       setStatus('❌ سازنده انتخاب‌شده در این مرورگر موجود نیست.', 'error');
+      setOnlineResult('<b>❌ سازنده SpeechRecognition در این مرورگر در دسترس نیست.</b>', 'error');
       showOnlineDiagnostic(lang, preferred, 'constructor-null');
       return;
     }
@@ -821,6 +833,7 @@
     recognition = r;
     recognitionBeforeText = textBox.value;
     addLangResult(lang + ' / ' + preferred, 'start() در حال اجرا...', 'yellow');
+    setOnlineResult('<b>تست آنلاین:</b> در حال شروع SpeechRecognition...<br><b>زبان:</b> ' + escapeHtml(lang) + '<br><b>سازنده:</b> ' + escapeHtml(preferred));
     setStatus('🎤 ' + lang + ' — سرویس آنلاین در حال شروع است...', 'warn');
     showOnlineDiagnostic(lang, preferred, 'before-start');
 
@@ -837,6 +850,7 @@
       listening = true;
       setBadge(speechBadge, 'شروع شد', 'green');
       addLangResult(lang + ' / ' + preferred, 'onstart موفق', 'green');
+      setOnlineResult('<b>✅ تست آنلاین با موفقیت شروع شد.</b><br><b>زبان:</b> ' + escapeHtml(lang) + '<br><b>سازنده:</b> ' + escapeHtml(preferred) + '<br>حالا یک جمله بگویید.', 'ok');
       setStatus('🎤 در حال گوش دادن... صحبت کنید.', 'ok');
       showOnlineDiagnostic(lang, preferred, 'onstart-success');
     };
@@ -867,6 +881,7 @@
       const code = event.error || 'unknown';
       const msg = event.message || '';
       addLangResult(lang + ' / ' + preferred, 'onerror: ' + code, code === 'not-allowed' ? 'red' : 'yellow');
+      setOnlineResult('<b>❌ تست آنلاین با خطا متوقف شد.</b><br><b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد خطا:</b> ' + escapeHtml(code) + '<br><b>پیام:</b> ' + escapeHtml(msg || '(خالی)') + '<br><br><span>قسمت «بررسی امکان تشخیص آفلاین» مستقل از این تست است.</span>', 'error');
       const extra =
         '<b>event.error:</b> ' + escapeHtml(code) + '<br>' +
         '<b>event.message:</b> ' + escapeHtml(msg || '(خالی)') + '<br>' +
@@ -892,6 +907,7 @@
       const msg = e.message || 'بدون توضیح';
       setStatus('❌ start() برای ' + lang + ' شکست خورد.', 'error');
       addLangResult(lang + ' / ' + preferred, 'start(): ' + name, 'red');
+      setOnlineResult('<b>❌ خود start() با خطا متوقف شد.</b><br><b>زبان:</b> ' + escapeHtml(lang) + '<br><b>کد:</b> ' + escapeHtml(name) + '<br><b>پیام:</b> ' + escapeHtml(msg), 'error');
       showOnlineDiagnostic(
         lang,
         preferred,
@@ -907,6 +923,7 @@
     // the implementation exposed by Chromium-based mobile browsers.
     const info = recognitionConstructorInfo();
     const ctor = info.hasWebkit ? 'webkitSpeechRecognition' : info.primary;
+    setOnlineResult('<b>تست انتخاب‌شده:</b> ' + escapeHtml(lang) + '<br>دقت کن: متن «هنوز بررسی آفلاین انجام نشده است» مربوط به بخش آفلاین است و برای این تست اهمیتی ندارد.');
     testOnlineRecognition(lang, ctor);
   }
 

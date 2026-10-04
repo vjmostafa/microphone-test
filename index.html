@@ -223,7 +223,7 @@
   <div class="page">
     <main class="card">
       <h1>تست تایپ و تبدیل گفتار به نوشتار</h1>
-      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V7</b></div>
+      <div style="text-align:center; margin:4px 0 12px; font-size:12px; color:#64748b;">نسخه تست: <b>V8</b></div>
 
       <div class="hint">
         برای تایپ معمولی داخل کادر بنویسید. برای گفتار، ابتدا میکروفون را تست کنید
@@ -344,6 +344,7 @@
   let analyser = null;
   let meterTimer = null;
   let recognitionBeforeText = '';
+  let recognitionWatchdog = null;
 
   const SpeechRecognition =
     window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -456,6 +457,32 @@
       result.onchange = () => checkPermission();
     } catch (e) {
       // برخی مرورگرهای موبایل query برای microphone را ارائه نمی‌کنند.
+    }
+  }
+
+  function releaseMicrophoneForSpeechNow() {
+    // Release every microphone resource immediately before SpeechRecognition.
+    // This function is synchronous on purpose so it does not break the user
+    // activation chain on Android Chrome.
+    stopMeter();
+
+    if (micStream) {
+      try {
+        micStream.getTracks().forEach(track => track.stop());
+      } catch (e) {}
+      micStream = null;
+    }
+
+    analyser = null;
+
+    if (audioContext) {
+      try {
+        const ctx = audioContext;
+        audioContext = null;
+        ctx.close().catch(() => {});
+      } catch (e) {
+        audioContext = null;
+      }
     }
   }
 
@@ -792,6 +819,11 @@
 
     releaseMicrophoneForSpeechNow();
 
+    if (recognitionWatchdog) {
+      clearTimeout(recognitionWatchdog);
+      recognitionWatchdog = null;
+    }
+
     if (recognition) {
       try { recognition.abort(); } catch (e) {}
       clearRecognitionHandlers(recognition);
@@ -847,6 +879,10 @@
       setStatus('🗣 گفتار شناسایی شد؛ در حال تبدیل به متن...', 'ok');
     };
     r.onstart = () => {
+      if (recognitionWatchdog) {
+        clearTimeout(recognitionWatchdog);
+        recognitionWatchdog = null;
+      }
       listening = true;
       setBadge(speechBadge, 'شروع شد', 'green');
       addLangResult(lang + ' / ' + preferred, 'onstart موفق', 'green');
@@ -877,6 +913,10 @@
       );
     };
     r.onerror = (event) => {
+      if (recognitionWatchdog) {
+        clearTimeout(recognitionWatchdog);
+        recognitionWatchdog = null;
+      }
       listening = false;
       const code = event.error || 'unknown';
       const msg = event.message || '';
@@ -893,6 +933,10 @@
       setDetails('<b>onspeechend:</b> پایان گفتار.<br><b>زبان:</b> ' + escapeHtml(lang));
     };
     r.onend = () => {
+      if (recognitionWatchdog) {
+        clearTimeout(recognitionWatchdog);
+        recognitionWatchdog = null;
+      }
       listening = false;
       interimEl.textContent = '';
       if (!statusEl.classList.contains('status error')) setStatus('آماده', '');
@@ -902,6 +946,28 @@
       // Critical: no await / setTimeout / Promise before start().
       r.start();
       addLangResult(lang + ' / ' + preferred, 'start() بدون خطای فوری', 'green');
+
+      // Some Android/Chromium builds can fail to emit onstart/onerror.
+      // Report that explicitly instead of leaving the user with an ambiguous state.
+      recognitionWatchdog = setTimeout(() => {
+        recognitionWatchdog = null;
+        if (!listening && recognition === r) {
+          setStatus('⚠️ SpeechRecognition پاسخی از سرویس نگرفت.', 'warn');
+          addLangResult(lang + ' / ' + preferred, 'بدون onstart/onerror تا ۸ ثانیه', 'yellow');
+          setOnlineResult(
+            '<b>⚠️ پاسخ مشخصی از SpeechRecognition دریافت نشد.</b><br>' +
+            '<b>زبان:</b> ' + escapeHtml(lang) + '<br>' +
+            '<b>سازنده:</b> ' + escapeHtml(preferred) + '<br>' +
+            '<b>مدت انتظار:</b> ۸ ثانیه<br><br>' +
+            'این نتیجه با «not-allowed» فرق دارد؛ در این حالت مرورگر هیچ رویداد شروع/خطایی ارسال نکرده است.',
+            ''
+          );
+          showOnlineDiagnostic(lang, preferred, 'watchdog-timeout',
+            '<b>نتیجه:</b> start() بدون خطای فوری اجرا شد، اما تا ۸ ثانیه هیچ onstart/onerror دریافت نشد.'
+          );
+          try { r.abort(); } catch (e) {}
+        }
+      }, 8000);
     } catch (e) {
       const name = e.name || 'UnknownError';
       const msg = e.message || 'بدون توضیح';
